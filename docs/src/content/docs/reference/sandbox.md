@@ -61,6 +61,7 @@ strict: false
 | `docker` (default) | Default Docker runtime, rootless AWF, network isolation |
 | `docker-sudo-iptables` | Docker with privileged AWF, legacy `iptables` networking, and host/service access |
 | `cloud-hypervisor` | Preview KVM runtime with its required privileged launcher |
+| `host-user` | Experimental: no AWF; the agent runs on the runner VM as a separate unprivileged user (see [Host-user sandbox](#host-user-sandbox-experimental)) |
 
 Omitting `runtime` is equivalent to `runtime: docker`, which keeps the secure default.
 
@@ -72,6 +73,35 @@ sandbox:
 ```
 
 The compiler derives every privilege the selected runtime needs. Unsupported combinations, such as `allow-host-ports` outside `docker-sudo-iptables`, fail at compile time. See [Agent Runtimes](/gh-aw/reference/agent-runtimes/) for runner prerequisites.
+
+### Host-user sandbox (Experimental)
+
+`runtime: host-user` runs the agent without AWF, directly on the runner VM as a separate user, `runner-sandbox`. It is for agents whose normal work needs what a container sandbox can't easily give: rootless `podman build` with multiple uids, `podman run`, and `/dev/kvm` for test VMs.
+
+```yaml wrap
+runs-on: ubuntu-26.04
+strict: false
+engine: claude
+sandbox:
+  agent:
+    runtime: host-user
+```
+
+gh-aw's setup, the MCP gateway, artifacts, safe outputs and the conclusion run as the runner user as usual. Around the agent step the compiler adds:
+
+- **An inference proxy.** AWF's api-proxy image runs as a runner-side container on `127.0.0.1` and holds the engine's API key. The agent step references no secret; the agent reaches inference through `ANTHROPIC_BASE_URL` with a placeholder credential, and the MCP gateway on localhost as before.
+- **An enter step** (root) that creates `runner-sandbox` with subordinate ids and the `kvm` group but no sudo, polkit, cron or lingering, closes the runner's home, and grants the user the workspace with ACLs. It refuses a workspace whose `.git/config` still holds a credential, and a workspace or `RUNNER_TEMP` outside the runner's home.
+- **The agent step**, which runs the engine through `run0` as `runner-sandbox` in a logind session of its own, with only the step's non-secret environment variables. The session, and the user's systemd manager through a drop-in, see the filesystem read-only (`ProtectSystem=strict`) except for the workspace, the user's home and runtime directory; `/tmp`, `/var/tmp`, `/dev/shm` and `/run/lock` are private; and the runner's home is an empty directory except for the workspace and read-only snapshots of gh-aw's scripts and MCP client configuration.
+- **A seal step** (`if: always()`) that stops every process of the user (its systemd user manager, rootless podman's pause process, containers and stragglers), sweeps the shared temporary directories for anything it left, hands the workspace back to the runner, restores `.git/config` and `.git/hooks` (dropping `commondir`/`gitdir` redirections and every nested repository, so the runner's git has no submodule to recurse into), and deletes the user.
+
+The agent works in the runner's checkout, so the safe outputs MCP server sees its changes, as with AWF. As with AWF, that server runs git in the checkout while the agent is still running.
+
+Limitations:
+
+- Network egress is **not** restricted: `network.allowed` is not enforced for the agent. Strict mode therefore refuses this runtime, and the compiler warns when it is used.
+- It needs `run0` (systemd 256 or later): `runs-on: ubuntu-26.04` or a self-hosted runner with it. The compiler refuses `ubuntu-latest`, `ubuntu-24.04` and older, macOS and Windows runners, and an omitted `runs-on`.
+- Only `engine: claude` with the Anthropic provider is supported so far. The `sandbox.agent` fields that configure AWF (`command`, `args`, `env`, `mounts`, `memory`, `config`, `images`, `targets` and the like), `tools.github.mode: gh-proxy`, `cache-memory`, `repo-memory`, enclaves and `runner.topology: arc-dind` are refused.
+- Threat detection, when enabled, still runs in its own job under AWF.
 
 ### MCP Gateway (Experimental)
 

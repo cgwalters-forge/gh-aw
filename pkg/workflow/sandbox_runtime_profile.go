@@ -38,6 +38,11 @@ type sandboxRuntimeProfile struct {
 	// SupportsHostAccess is true when sandbox.agent.allow-host-ports and
 	// automatic connectivity to GitHub Actions services: are available.
 	SupportsHostAccess bool
+
+	// HostUser is true when the agent runs on the runner VM as a separate
+	// unprivileged user instead of inside AWF (see host_user_sandbox.go). AWF is
+	// not used for the agent step at all in this profile.
+	HostUser bool
 }
 
 // sandboxRuntimeProfiles maps each supported runtime to its profile.
@@ -63,6 +68,10 @@ var sandboxRuntimeProfiles = map[AgentRuntime]sandboxRuntimeProfile{
 		// legacy-security or host-access flags are implied by the sudo prefix.
 		AWFCommand: constants.AWFCloudHypervisorCommand,
 	},
+	AgentRuntimeHostUser: {
+		Runtime:  AgentRuntimeHostUser,
+		HostUser: true,
+	},
 }
 
 // supportedAgentRuntimes lists the runtime values accepted in frontmatter, in
@@ -71,6 +80,7 @@ var supportedAgentRuntimes = []AgentRuntime{
 	AgentRuntimeDocker,
 	AgentRuntimeDockerSudoIptables,
 	AgentRuntimeCloudHypervisor,
+	AgentRuntimeHostUser,
 }
 
 // supportedAgentRuntimeNames returns the supported runtime values as strings.

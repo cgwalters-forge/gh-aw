@@ -28,6 +28,12 @@ func TestSandboxRuntimeProfiles(t *testing.T) {
 
 			profile := resolveSandboxRuntimeProfile(&AgentSandboxConfig{Runtime: runtime})
 			assert.Equal(t, runtime, profile.Runtime, "runtime %q must resolve to its own profile", runtime)
+			if profile.HostUser {
+				// host-user sandboxes the agent with a separate user, not AWF.
+				assert.Equal(t, AgentRuntimeHostUser, runtime)
+				assert.Empty(t, profile.AWFCommand, "host-user must not define an AWF command")
+				continue
+			}
 			assert.True(t, profile.NetworkIsolation, "runtime %q must keep network isolation", runtime)
 			assert.NotEmpty(t, profile.AWFCommand, "runtime %q must define an AWF command", runtime)
 		}

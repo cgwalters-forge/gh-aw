@@ -229,7 +229,7 @@ const detectionFirewallLogsDir = constants.ThreatDetectionDir + "/sandbox/firewa
 // it is not part of any uploaded artifact, so the usage artifact and the AI-credits budget
 // cap have nothing to observe for the detection phase (see gh-aw#54047/#54046).
 func (c *Compiler) buildCopyDetectionFirewallLogsStep(data *WorkflowData) []string {
-	if !isFirewallEnabled(data) {
+	if !isDetectionFirewallEnabled(data) {
 		threatLog.Print("Firewall disabled, skipping detection firewall log copy step")
 		return nil
 	}
@@ -538,7 +538,7 @@ func (c *Compiler) buildUploadDetectionLogStep(data *WorkflowData) []string {
 		"            " + constants.TmpGhAwDir + "/threat-detection/detection_usage.json\n",
 		"            " + constants.TmpGhAwDir + "/threat-detection/detection_usage.jsonl\n",
 	}
-	if isFirewallEnabled(data) {
+	if isDetectionFirewallEnabled(data) {
 		threatLog.Print("Including firewall logs in detection log upload artifact")
 		steps = append(steps,
 			"            "+detectionFirewallLogsDir+"/logs/\n",

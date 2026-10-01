@@ -48,6 +48,16 @@ func (c *Compiler) validateStrictSandboxCustomization(sandboxConfig *SandboxConf
 			agent.Type = SandboxTypeAWF
 		}
 
+		// Strict mode promises enforced network permissions, which the host-user
+		// runtime does not provide yet.
+		if !agent.Disabled && agent.Runtime == AgentRuntimeHostUser {
+			return fmt.Errorf(
+				"strict mode: 'sandbox.agent.runtime: %s' does not restrict network egress yet, so network permissions would not be enforced. "+
+					"Set 'strict: false' to use it. See: https://github.github.com/gh-aw/reference/sandbox/",
+				AgentRuntimeHostUser,
+			)
+		}
+
 		if agent.Command != "" {
 			return internalSandboxFieldError("sandbox.agent.command")
 		}
