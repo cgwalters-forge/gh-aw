@@ -250,7 +250,8 @@ func TestValidateStrictSandboxCustomizationSetsAWFDefault(t *testing.T) {
 // TestValidateStrictSandboxCustomizationRuntimeProfiles tests that every supported
 // runtime profile passes strict-mode sandbox customization validation: the privileged
 // setup each runtime needs is derived by the compiler instead of being requested with
-// a dedicated sudo field.
+// a dedicated sudo field. The exception is host-user, which strict mode refuses
+// because it does not restrict network egress.
 func TestValidateStrictSandboxCustomizationRuntimeProfiles(t *testing.T) {
 	for _, runtime := range append([]AgentRuntime{""}, supportedAgentRuntimes...) {
 		for _, strict := range []bool{true, false} {
@@ -266,7 +267,12 @@ func TestValidateStrictSandboxCustomizationRuntimeProfiles(t *testing.T) {
 				compiler.strictMode = strict
 				initialWarnings := compiler.GetWarningCount()
 
-				if err := compiler.validateStrictSandboxCustomization(sandbox); err != nil {
+				err := compiler.validateStrictSandboxCustomization(sandbox)
+				if runtime == AgentRuntimeHostUser && strict {
+					if err == nil || !strings.Contains(err.Error(), "does not restrict network egress") {
+						t.Errorf("Expected strict mode to refuse runtime %q, got: %v", runtime, err)
+					}
+				} else if err != nil {
 					t.Errorf("Expected no error for runtime %q (strict=%v), got: %v", runtime, strict, err)
 				}
 				if compiler.GetWarningCount() != initialWarnings {

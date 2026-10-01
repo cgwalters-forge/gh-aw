@@ -2342,8 +2342,12 @@ sandbox:
     # access (required for allow-host-ports and GitHub Actions services:
     # connectivity); 'cloud-hypervisor' runs the agent in AWF's preview Cloud
     # Hypervisor microVM runtime on GitHub-hosted Ubuntu x86_64, sized at 2 vCPUs and
-    # 4096 MiB. Omitting runtime is equivalent to 'docker'. cloud-hypervisor is
-    # incompatible with runner.topology: arc-dind.
+    # 4096 MiB; 'host-user' (experimental) runs the agent without AWF, directly on the
+    # runner VM as a separate unprivileged user in its own logind session (via run0,
+    # so it needs systemd 256 or later, e.g. ubuntu-26.04), which allows rootless
+    # podman and /dev/kvm; the inference key stays in a runner-side proxy, but network
+    # egress is not restricted. Omitting runtime is equivalent to 'docker'.
+    # cloud-hypervisor is incompatible with runner.topology: arc-dind.
     # (optional)
     runtime: "docker"
 

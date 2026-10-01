@@ -121,6 +121,11 @@ func (c *Compiler) generateEngineExecutionSteps(yaml *strings.Builder, data *Wor
 	steps := engine.GetExecutionSteps(data, logFile)
 	compilerYamlLog.Printf("Generating engine execution steps: engine=%s, steps=%d", engine.GetID(), len(steps))
 
+	hostUser := isHostUserRuntime(data)
+	if hostUser {
+		generateHostUserPreAgentSteps(yaml, data, resolveHostUserLLMProvider(engine, data))
+	}
+
 	for _, step := range steps {
 		for _, line := range step {
 			if strings.Contains(line, "id: agentic_execution") {
@@ -132,6 +137,10 @@ func (c *Compiler) generateEngineExecutionSteps(yaml *strings.Builder, data *Wor
 			yaml.WriteString(line)
 			yaml.WriteByte('\n')
 		}
+	}
+
+	if hostUser {
+		generateHostUserPostAgentSteps(yaml)
 	}
 }
 

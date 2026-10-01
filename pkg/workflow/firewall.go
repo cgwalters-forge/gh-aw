@@ -29,11 +29,28 @@ func isFirewallDisabledBySandboxAgent(workflowData *WorkflowData) bool {
 		workflowData.SandboxConfig.Agent.Disabled
 }
 
+// isHostUserRuntime returns true when the agent runs on the runner VM as a
+// separate unprivileged user instead of inside AWF (sandbox.agent.runtime: host-user).
+func isHostUserRuntime(workflowData *WorkflowData) bool {
+	agentConfig := getAgentConfig(workflowData)
+	if agentConfig == nil || agentConfig.Disabled {
+		return false
+	}
+	return resolveSandboxRuntimeProfile(agentConfig).HostUser
+}
+
 // isAgentOnRunnerHost returns true when the agent runs directly on the runner
 // rather than inside a container, so it reaches host services (the MCP gateway,
 // MCP scripts) at localhost instead of host.docker.internal.
 func isAgentOnRunnerHost(workflowData *WorkflowData) bool {
-	return isFirewallDisabledBySandboxAgent(workflowData)
+	return isFirewallDisabledBySandboxAgent(workflowData) || isHostUserRuntime(workflowData)
+}
+
+// isDetectionFirewallEnabled reports whether the threat-detection job runs under
+// AWF. It follows the agent job, except that host-user only changes how the agent
+// job is sandboxed: detection still runs under AWF.
+func isDetectionFirewallEnabled(workflowData *WorkflowData) bool {
+	return isFirewallEnabled(workflowData) || isHostUserRuntime(workflowData)
 }
 
 // isFirewallEnabled checks if AWF firewall is enabled for the workflow
@@ -45,6 +62,12 @@ func isFirewallEnabled(workflowData *WorkflowData) bool {
 	// Check if sandbox.agent: false (new way to disable firewall)
 	if isFirewallDisabledBySandboxAgent(workflowData) {
 		firewallLog.Print("Firewall disabled via sandbox.agent: false")
+		return false
+	}
+
+	// The host-user runtime sandboxes the agent with a separate user instead of AWF.
+	if isHostUserRuntime(workflowData) {
+		firewallLog.Print("Firewall not used: sandbox.agent.runtime is host-user")
 		return false
 	}
 

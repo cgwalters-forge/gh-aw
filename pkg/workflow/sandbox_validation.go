@@ -143,6 +143,9 @@ func validateSandboxConfig(workflowData *WorkflowData) error { //nolint:largefun
 	if err := validateSandboxRuntimeProfile(workflowData, agentConfig); err != nil {
 		return err
 	}
+	if err := validateHostUserRuntime(workflowData); err != nil {
+		return err
+	}
 
 	// Validate cloud-hypervisor runtime compatibility
 	if agentConfig != nil && agentConfig.Runtime == AgentRuntimeCloudHypervisor {
@@ -337,6 +340,12 @@ func validateSandboxRuntimeProfile(workflowData *WorkflowData, agentConfig *Agen
 	}
 
 	profile := resolveSandboxRuntimeProfile(agentConfig)
+
+	// The host-user runtime runs the agent on the runner itself, so it reaches
+	// service containers directly; validateHostUserRuntime covers the rest.
+	if profile.HostUser {
+		return nil
+	}
 
 	// Host access (explicit host ports and automatic GitHub Actions services:
 	// connectivity) requires the privileged iptables profile.

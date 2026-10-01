@@ -65,6 +65,11 @@ const (
 	// AgentRuntimeCloudHypervisor runs the agent inside a Cloud Hypervisor microVM
 	// using AWF's preview cloud-hypervisor runtime mode.
 	AgentRuntimeCloudHypervisor AgentRuntime = "cloud-hypervisor"
+
+	// AgentRuntimeHostUser runs the agent directly on the runner VM as a separate
+	// unprivileged user (runner-sandbox) in its own logind session started by run0,
+	// instead of inside AWF. It needs systemd 256 or later (ubuntu-26.04).
+	AgentRuntimeHostUser AgentRuntime = "host-user"
 )
 
 // AgentSandboxConfig represents the agent sandbox configuration

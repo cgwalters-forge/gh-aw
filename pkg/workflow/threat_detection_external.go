@@ -709,7 +709,7 @@ func (c *Compiler) buildUploadDetectionArtifactStep(data *WorkflowData) []string
 	// AI-credits budget cap (see gh-aw#54047). These are firewall/proxy metadata, not the
 	// untrusted agent transcript, so bundling them does not introduce the secret-exfiltration
 	// risk that keeps detection.log off this artifact.
-	if isFirewallEnabled(data) {
+	if isDetectionFirewallEnabled(data) {
 		threatLog.Print("Including firewall logs in detection artifact upload")
 		steps = append(steps,
 			"            "+detectionFirewallLogsDir+"/logs/\n",

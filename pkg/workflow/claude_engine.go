@@ -9,6 +9,7 @@ import (
 
 	"github.com/github/gh-aw/pkg/constants"
 	"github.com/github/gh-aw/pkg/logger"
+	"github.com/github/gh-aw/pkg/sliceutil"
 	"github.com/github/gh-aw/pkg/workflow/compilerenv"
 )
 
@@ -193,11 +194,27 @@ func (e *ClaudeEngine) GetExecutionSteps(workflowData *WorkflowData, logFile str
 
 	claudeCommand := e.buildClaudeCommandString(workflowData, claudeArgs, mcpConfigArg, modelConfigured)
 
-	// Build the full command based on whether firewall is enabled
-	command := e.buildClaudeFullCommand(workflowData, claudeCommand, logFile)
-
 	// Build environment variables map
 	env := e.buildClaudeCommandEnv(workflowData)
+
+	// Filter environment variables to only include allowed secrets.
+	// This is a security measure to prevent exposing unnecessary secrets to the AWF container.
+	filteredEnv := FilterEnvForSecrets(env, e.GetRequiredSecretNames(workflowData))
+
+	// Inject GH_TOKEN for CLI proxy (added after filtering since it uses a special
+	// fallback expression that is always allowed when cli-proxy is enabled)
+	addCliProxyGHTokenToEnv(filteredEnv, workflowData)
+
+	// The host-user sandbox gets the step's whole environment, so no secret may stay in it.
+	if isHostUserRuntime(workflowData) {
+		applyHostUserAgentEnv(filteredEnv, e.ResolveLLMProvider(workflowData))
+	}
+
+	// Build the full command based on whether firewall is enabled
+	command := e.buildClaudeFullCommand(workflowData, claudeCommand, logFile, sliceutil.SortedKeys(filteredEnv))
+	if isHostUserRuntime(workflowData) {
+		filteredEnv[HostUserAgentCommandEnv] = claudeCommand
+	}
 
 	// Generate the step for Claude CLI execution
 	var stepLines []string
@@ -214,14 +231,6 @@ func (e *ClaudeEngine) GetExecutionSteps(workflowData *WorkflowData, logFile str
 
 	// Add timeout at step level (GitHub Actions standard)
 	stepLines = append(stepLines, "        timeout-minutes: "+resolveStepTimeoutValue(workflowData))
-
-	// Filter environment variables to only include allowed secrets.
-	// This is a security measure to prevent exposing unnecessary secrets to the AWF container.
-	filteredEnv := FilterEnvForSecrets(env, e.GetRequiredSecretNames(workflowData))
-
-	// Inject GH_TOKEN for CLI proxy (added after filtering since it uses a special
-	// fallback expression that is always allowed when cli-proxy is enabled)
-	addCliProxyGHTokenToEnv(filteredEnv, workflowData)
 
 	stepLines = FormatStepWithCommandAndEnv(stepLines, wrapAgentExecutionCommand(command), filteredEnv)
 	steps = append(steps, GitHubActionStep(stepLines))
@@ -377,7 +386,8 @@ func (e *ClaudeEngine) buildClaudeCommandString(workflowData *WorkflowData, clau
 
 // buildClaudeFullCommand wraps the claude command with the AWF firewall wrapper (when enabled)
 // or formats it as a plain bash command (when the firewall is disabled).
-func (e *ClaudeEngine) buildClaudeFullCommand(workflowData *WorkflowData, claudeCommand string, logFile string) string {
+// sandboxEnvNames lists the step variables forwarded into the host-user sandbox.
+func (e *ClaudeEngine) buildClaudeFullCommand(workflowData *WorkflowData, claudeCommand string, logFile string, sandboxEnvNames []string) string {
 	if isFirewallEnabled(workflowData) {
 		// Get allowed domains: prefer the pre-warmed cache on WorkflowData (populated by
 		// computeAllowedDomainsForSanitization before GetExecutionSteps is called) to avoid
@@ -423,6 +433,16 @@ func (e *ClaudeEngine) buildClaudeFullCommand(workflowData *WorkflowData, claude
 			ExcludeEnvVarNames:   ComputeAWFExcludeEnvVarNames(workflowData, llmProviderSecretNames(e.ResolveLLMProvider(workflowData))),
 			RetryStartupFailures: true,
 		})
+	}
+
+	if isHostUserRuntime(workflowData) {
+		// Run Claude as the sandbox user; stdout still reaches the log through tee on the runner side.
+		return fmt.Sprintf(`set -o pipefail
+printf '%%s' "$(date +%%s%%3N)" > %s
+%s
+# Execute Claude Code CLI with prompt from file, as the host-user sandbox user
+%s`, AgentCLIStartMsPath, buildAgentOutputFilesSetup(AgentStepSummaryPath, logFile, claudeDebugLogFile),
+			buildHostUserAgentCommand(sandboxEnvNames, []string{AgentStepSummaryPath, claudeDebugLogFile}, logFile))
 	}
 
 	// Run Claude command without AWF wrapper.

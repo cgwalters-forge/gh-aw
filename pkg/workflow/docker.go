@@ -106,6 +106,16 @@ func collectDockerImages(tools map[string]any, workflowData *WorkflowData, actio
 		}
 	}
 
+	// The host-user sandbox runs AWF's api-proxy standalone as its inference proxy.
+	if isHostUserRuntime(workflowData) {
+		image := hostUserAPIProxyImage(workflowData)
+		if !setutil.Contains(imageSet, image) {
+			images = append(images, image)
+			imageSet[image] = struct{}{}
+			dockerLog.Printf("Added host-user inference proxy container: %s", image)
+		}
+	}
+
 	// Collect sandbox.mcp container (MCP gateway)
 	// Skip if sandbox is disabled (sandbox: false)
 	if workflowData != nil && workflowData.SandboxConfig != nil {
