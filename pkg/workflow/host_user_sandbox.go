@@ -26,6 +26,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/github/gh-aw/pkg/constants"
 	"github.com/github/gh-aw/pkg/logger"
 )
 
@@ -75,13 +76,15 @@ func hostUserAPIProxyImage(workflowData *WorkflowData) string {
 	return defaultAWFImageForRole(awfImageRoleAPIProxy, getAWFImageTag(getFirewallConfig(workflowData)))
 }
 
-// resolveHostUserLLMProvider returns the provider whose key the inference proxy
-// holds. Validation restricts the runtime to engines that resolve to Anthropic.
-func resolveHostUserLLMProvider(engine CodingAgentEngine, workflowData *WorkflowData) LLMProvider {
-	if resolver, ok := engine.(InferenceProviderResolver); ok {
-		return resolver.ResolveLLMProvider(workflowData)
-	}
-	return LLMProviderAnthropic
+// hostUserUsesAPIProxy reports whether the agent reaches inference through the
+// runner-side api-proxy, which holds the engine's API key: the Claude engine on
+// Anthropic's API. Otherwise the workflow points the engine at an endpoint of its
+// own with engine.env (OPENAI_BASE_URL / ANTHROPIC_BASE_URL) that needs no secret,
+// such as a credential broker, and the agent talks to it directly.
+func hostUserUsesAPIProxy(workflowData *WorkflowData) bool {
+	return workflowData != nil && workflowData.EngineConfig != nil &&
+		workflowData.EngineConfig.ID == string(constants.ClaudeEngine) &&
+		!hasCustomLLMAPITarget(workflowData)
 }
 
 // hostUserAPIProxyBaseURL is where the sandbox reaches the inference proxy.
@@ -105,19 +108,18 @@ func isSecretEnvValue(value string) bool {
 }
 
 // applyHostUserAgentEnv adjusts the agent step environment for the host-user
-// sandbox: the engine's API key moves to the inference proxy step, the engine
-// is pointed at the proxy with a placeholder credential, and every other
-// secret-bearing variable is dropped, since the step forwards its whole
-// environment into the sandbox.
-func applyHostUserAgentEnv(env map[string]string, provider LLMProvider) {
+// sandbox: every secret-bearing variable is dropped, since the step forwards its
+// whole environment into the sandbox, and with the api-proxy (useAPIProxy) the
+// engine is pointed at it with a placeholder credential.
+func applyHostUserAgentEnv(env map[string]string, useAPIProxy bool) {
 	for key, value := range env {
 		if isSecretEnvValue(value) || !hostUserEnvName.MatchString(key) {
 			hostUserLog.Printf("Dropping variable from the host-user agent step: %s", key)
 			delete(env, key)
 		}
 	}
-	if provider == LLMProviderAnthropic {
-		env["ANTHROPIC_BASE_URL"] = hostUserAPIProxyBaseURL(provider)
+	if useAPIProxy {
+		env["ANTHROPIC_BASE_URL"] = hostUserAPIProxyBaseURL(LLMProviderAnthropic)
 		env["ANTHROPIC_AUTH_TOKEN"] = hostUserPlaceholderAnthropicToken
 	}
 }
@@ -126,8 +128,9 @@ func applyHostUserAgentEnv(env map[string]string, provider LLMProvider) {
 // in the host-user sandbox. The caller passes the engine command itself in the
 // step variable HostUserAgentCommandEnv. envNames are the variables of the step
 // forwarded into the sandbox, writableFiles the pre-created files the engine
-// writes, and logFile receives the engine's stdout on the runner side.
-func buildHostUserAgentCommand(envNames []string, writableFiles []string, logFile string) string {
+// writes, and logFile receives the engine's stdout (and stderr too, with
+// mergeStderr) on the runner side.
+func buildHostUserAgentCommand(envNames []string, writableFiles []string, logFile string, mergeStderr bool) string {
 	names := slices.Clone(envNames)
 	// The engine finds node and its CLI through the PATH the setup steps built.
 	if !slices.Contains(names, "PATH") {
@@ -148,14 +151,29 @@ func buildHostUserAgentCommand(envNames []string, writableFiles []string, logFil
 	for _, path := range hostUserReadOnlyPaths {
 		fmt.Fprintf(&b, "if [ -e \"%s\" ]; then gh_aw_sandbox_args+=(\"--bind-ro=%s\"); fi\n", path, path)
 	}
-	fmt.Fprintf(&b, "sudo -n bash \"%s\" run \"${gh_aw_sandbox_args[@]}\" -- \"%s\" | tee -a %s", hostUserSandboxScript, hostUserAgentCommandFile, logFile)
+	redirect := ""
+	if mergeStderr {
+		redirect = " 2>&1"
+	}
+	fmt.Fprintf(&b, "sudo -n bash \"%s\" run \"${gh_aw_sandbox_args[@]}\" -- \"%s\"%s | tee -a %s", hostUserSandboxScript, hostUserAgentCommandFile, redirect, logFile)
 	return b.String()
 }
 
 // generateHostUserPreAgentSteps writes the steps that start the inference proxy
-// and enter the sandbox, right before the engine runs.
-func generateHostUserPreAgentSteps(yaml *strings.Builder, data *WorkflowData, provider LLMProvider) {
+// (when the engine uses it) and enter the sandbox, right before the engine runs.
+func generateHostUserPreAgentSteps(yaml *strings.Builder, data *WorkflowData) {
 	hostUserLog.Print("Generating host-user sandbox pre-agent steps")
+	if hostUserUsesAPIProxy(data) {
+		generateHostUserAPIProxyStartStep(yaml, data)
+	}
+	yaml.WriteString("      - name: Enter the host-user sandbox\n")
+	fmt.Fprintf(yaml, "        run: sudo -n bash \"%s\" enter \"$(id -un)\" \"${GITHUB_WORKSPACE}\" \"${RUNNER_TEMP}\"\n", hostUserSandboxScript)
+}
+
+// generateHostUserAPIProxyStartStep writes the step that starts AWF's api-proxy
+// on the runner, holding the Anthropic API key.
+func generateHostUserAPIProxyStartStep(yaml *strings.Builder, data *WorkflowData) {
+	provider := LLMProviderAnthropic
 	profile := llmProviderProfileFor(provider)
 	secretEnv := llmProviderSecretNames(provider)[0]
 	image := resolveContainerImage(hostUserAPIProxyImage(data), data)
@@ -174,19 +192,19 @@ func generateHostUserPreAgentSteps(yaml *strings.Builder, data *WorkflowData, pr
 	fmt.Fprintf(yaml, "          docker logs %s >&2 || true\n", hostUserAPIProxyContainer)
 	fmt.Fprintf(yaml, "          echo \"::error::The inference proxy did not become healthy within %d seconds\"\n", hostUserAPIProxyHealthTimeoutSeconds)
 	yaml.WriteString("          exit 1\n")
-
-	yaml.WriteString("      - name: Enter the host-user sandbox\n")
-	fmt.Fprintf(yaml, "        run: sudo -n bash \"%s\" enter \"$(id -un)\" \"${GITHUB_WORKSPACE}\" \"${RUNNER_TEMP}\"\n", hostUserSandboxScript)
 }
 
 // generateHostUserPostAgentSteps writes the steps that seal the sandbox and stop
 // the inference proxy. They run whatever the outcome of the agent step, before
 // any later step reads what the agent left.
-func generateHostUserPostAgentSteps(yaml *strings.Builder) {
+func generateHostUserPostAgentSteps(yaml *strings.Builder, data *WorkflowData) {
 	hostUserLog.Print("Generating host-user sandbox post-agent steps")
 	yaml.WriteString("      - name: Seal the host-user sandbox\n")
 	yaml.WriteString("        if: always()\n")
 	fmt.Fprintf(yaml, "        run: sudo -n bash \"%s\" seal\n", hostUserSandboxScript)
+	if !hostUserUsesAPIProxy(data) {
+		return
+	}
 
 	yaml.WriteString("      - name: Stop inference proxy for the host-user sandbox\n")
 	yaml.WriteString("        if: always()\n")

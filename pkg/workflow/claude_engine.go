@@ -207,7 +207,7 @@ func (e *ClaudeEngine) GetExecutionSteps(workflowData *WorkflowData, logFile str
 
 	// The host-user sandbox gets the step's whole environment, so no secret may stay in it.
 	if isHostUserRuntime(workflowData) {
-		applyHostUserAgentEnv(filteredEnv, e.ResolveLLMProvider(workflowData))
+		applyHostUserAgentEnv(filteredEnv, hostUserUsesAPIProxy(workflowData))
 	}
 
 	// Build the full command based on whether firewall is enabled
@@ -442,7 +442,7 @@ printf '%%s' "$(date +%%s%%3N)" > %s
 %s
 # Execute Claude Code CLI with prompt from file, as the host-user sandbox user
 %s`, AgentCLIStartMsPath, buildAgentOutputFilesSetup(AgentStepSummaryPath, logFile, claudeDebugLogFile),
-			buildHostUserAgentCommand(sandboxEnvNames, []string{AgentStepSummaryPath, claudeDebugLogFile}, logFile))
+			buildHostUserAgentCommand(sandboxEnvNames, []string{AgentStepSummaryPath, claudeDebugLogFile}, logFile, false))
 	}
 
 	// Run Claude command without AWF wrapper.

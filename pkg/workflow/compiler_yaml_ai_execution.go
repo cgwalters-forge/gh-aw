@@ -122,14 +122,16 @@ func (c *Compiler) generateEngineExecutionSteps(yaml *strings.Builder, data *Wor
 	compilerYamlLog.Printf("Generating engine execution steps: engine=%s, steps=%d", engine.GetID(), len(steps))
 
 	hostUser := isHostUserRuntime(data)
-	if hostUser {
-		generateHostUserPreAgentSteps(yaml, data, resolveHostUserLLMProvider(engine, data))
-	}
 
 	for _, step := range steps {
 		for _, line := range step {
 			if strings.Contains(line, "id: agentic_execution") {
 				step = injectComponentExecutionStarted(step, "agent", agentExecutionEvidencePath)
+				// Enter the sandbox right before the engine runs, after the engine's
+				// own setup steps (config files the sandbox must be able to read).
+				if hostUser {
+					generateHostUserPreAgentSteps(yaml, data)
+				}
 				break
 			}
 		}
@@ -140,7 +142,7 @@ func (c *Compiler) generateEngineExecutionSteps(yaml *strings.Builder, data *Wor
 	}
 
 	if hostUser {
-		generateHostUserPostAgentSteps(yaml)
+		generateHostUserPostAgentSteps(yaml, data)
 	}
 }
 

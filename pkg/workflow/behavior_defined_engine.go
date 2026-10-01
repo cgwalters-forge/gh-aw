@@ -13,6 +13,7 @@ import (
 	"github.com/github/gh-aw/pkg/constants"
 	"github.com/github/gh-aw/pkg/logger"
 	"github.com/github/gh-aw/pkg/setutil"
+	"github.com/github/gh-aw/pkg/sliceutil"
 	"github.com/goccy/go-yaml"
 )
 
@@ -517,11 +518,39 @@ func (e *BehaviorDefinedEngine) GetExecutionSteps(workflowData *WorkflowData, lo
 	exec := behavior.Execution
 	firewallEnabled := e.behaviorDefinedFirewallEnabled(workflowData)
 	engineCommand := e.buildBehaviorDefinedEngineCommand(exec, workflowData)
-	command := e.buildBehaviorDefinedExecutionCommand(exec, workflowData, logFile, engineCommand, firewallEnabled)
-	env := e.buildBehaviorDefinedExecutionEnv(exec, workflowData, firewallEnabled)
+	env := e.buildBehaviorDefinedStepEnv(exec, workflowData, firewallEnabled)
+	var command string
+	if isHostUserRuntime(workflowData) {
+		// The host-user sandbox gets the step's whole environment, so no secret may stay in it.
+		applyHostUserAgentEnv(env, hostUserUsesAPIProxy(workflowData))
+		command = e.buildBehaviorDefinedHostUserCommand(exec, logFile, sliceutil.SortedKeys(env))
+		env[HostUserAgentCommandEnv] = engineCommand
+	} else {
+		command = e.buildBehaviorDefinedExecutionCommand(exec, workflowData, logFile, engineCommand, firewallEnabled)
+	}
 	steps := e.buildBehaviorDefinedSetupSteps()
 	steps = append(steps, e.buildBehaviorDefinedExecutionStep(exec, workflowData, command, env))
 	return steps
+}
+
+// buildBehaviorDefinedStepEnv returns the execution step's environment, with only
+// the secrets the engine needs.
+func (e *BehaviorDefinedEngine) buildBehaviorDefinedStepEnv(exec *EngineExecutionDefinition, workflowData *WorkflowData, firewallEnabled bool) map[string]string {
+	env := FilterEnvForSecrets(e.buildBehaviorDefinedExecutionEnv(exec, workflowData, firewallEnabled), e.GetRequiredSecretNames(workflowData))
+	addCliProxyGHTokenToEnv(env, workflowData)
+	return env
+}
+
+// buildBehaviorDefinedHostUserCommand runs the engine command as the host-user
+// sandbox user, with stdout and stderr in the agent log as without a sandbox.
+func (e *BehaviorDefinedEngine) buildBehaviorDefinedHostUserCommand(exec *EngineExecutionDefinition, logFile string, sandboxEnvNames []string) string {
+	var b strings.Builder
+	b.WriteString("set -o pipefail\n")
+	if exec.WriteTimestamp {
+		fmt.Fprintf(&b, "printf '%%s' \"$(date +%%s%%3N)\" > %s\n", AgentCLIStartMsPath)
+	}
+	fmt.Fprintf(&b, "export no_proxy=\"${NO_PROXY:-}\"\n%s", buildHostUserAgentCommand(sandboxEnvNames, nil, logFile, true))
+	return b.String()
 }
 
 func (e *BehaviorDefinedEngine) buildBehaviorDefinedSetupSteps() []GitHubActionStep {
@@ -568,7 +597,7 @@ func (e *BehaviorDefinedEngine) buildBehaviorDefinedEngineCommand(exec *EngineEx
 
 func (e *BehaviorDefinedEngine) behaviorDefinedFirewallEnabled(workflowData *WorkflowData) bool {
 	firewallEnabled := isFirewallEnabled(workflowData)
-	if behavior := e.behavior(); behavior != nil && behavior.HarnessScript != "" && !isFirewallDisabledBySandboxAgent(workflowData) {
+	if behavior := e.behavior(); behavior != nil && behavior.HarnessScript != "" && !isAgentOnRunnerHost(workflowData) {
 		firewallEnabled = true
 	}
 	return firewallEnabled
@@ -654,9 +683,7 @@ func (e *BehaviorDefinedEngine) buildBehaviorDefinedExecutionStep(exec *EngineEx
 		"        id: agentic_execution",
 		"        timeout-minutes: " + resolveStepTimeoutValue(workflowData),
 	}
-	filteredEnv := FilterEnvForSecrets(env, e.GetRequiredSecretNames(workflowData))
-	addCliProxyGHTokenToEnv(filteredEnv, workflowData)
-	return GitHubActionStep(FormatStepWithCommandAndEnv(stepLines, wrapAgentExecutionCommand(command), filteredEnv))
+	return GitHubActionStep(FormatStepWithCommandAndEnv(stepLines, wrapAgentExecutionCommand(command), env))
 }
 
 func (e *BehaviorDefinedEngine) modelFlagFragment(exec *EngineExecutionDefinition, workflowData *WorkflowData) string {
