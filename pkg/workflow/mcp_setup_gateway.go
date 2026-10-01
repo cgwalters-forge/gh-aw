@@ -205,7 +205,7 @@ func resolveMCPGatewayValues(workflowData *WorkflowData, gatewayConfig *MCPGatew
 	}
 	domain := gatewayConfig.Domain
 	if domain == "" {
-		if workflowData.SandboxConfig.Agent != nil && workflowData.SandboxConfig.Agent.Disabled {
+		if isAgentOnRunnerHost(workflowData) {
 			domain = "localhost"
 		} else if isAWFNetworkIsolationEnabled(workflowData) {
 			domain = "awmg-mcpg"

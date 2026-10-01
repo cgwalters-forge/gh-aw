@@ -62,12 +62,10 @@ func rewriteLocalhostToDockerHost(url string) string {
 
 // shouldRewriteLocalhostToDocker returns true when MCP server localhost URLs should be
 // rewritten to host.docker.internal so that containerised AI agents can reach servers
-// running on the host. Rewriting is enabled whenever the agent sandbox is active
-// (i.e. sandbox.agent is not explicitly disabled).
+// running on the host. Rewriting is enabled whenever the agent runs in a container
+// (i.e. not directly on the runner host).
 func shouldRewriteLocalhostToDocker(workflowData *WorkflowData) bool {
-	result := workflowData != nil && (workflowData.SandboxConfig == nil ||
-		workflowData.SandboxConfig.Agent == nil ||
-		!workflowData.SandboxConfig.Agent.Disabled)
+	result := workflowData != nil && !isAgentOnRunnerHost(workflowData)
 	mcpRenderingLog.Printf("shouldRewriteLocalhostToDocker: %v (agent sandbox active)", result)
 	return result
 }
