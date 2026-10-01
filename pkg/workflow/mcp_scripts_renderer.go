@@ -52,10 +52,10 @@ func renderMCPScriptsMCPConfigWithOptions(yaml *strings.Builder, mcpScripts *MCP
 
 	// Determine host based on whether agent is disabled
 	host := "host.docker.internal"
-	if workflowData != nil && workflowData.SandboxConfig != nil && workflowData.SandboxConfig.Agent != nil && workflowData.SandboxConfig.Agent.Disabled {
-		// When agent is disabled (no firewall), use localhost instead of host.docker.internal
+	if isAgentOnRunnerHost(workflowData) {
+		// When the agent runs on the runner itself, use localhost instead of host.docker.internal
 		host = "localhost"
-		mcpScriptsRendererLog.Print("Agent disabled, using localhost for MCP Scripts server")
+		mcpScriptsRendererLog.Print("Agent runs on the runner host, using localhost for MCP Scripts server")
 	}
 
 	// HTTP URL using environment variable - NOT escaped so shell expands it before awmg validation

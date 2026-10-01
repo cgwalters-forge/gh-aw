@@ -29,6 +29,13 @@ func isFirewallDisabledBySandboxAgent(workflowData *WorkflowData) bool {
 		workflowData.SandboxConfig.Agent.Disabled
 }
 
+// isAgentOnRunnerHost returns true when the agent runs directly on the runner
+// rather than inside a container, so it reaches host services (the MCP gateway,
+// MCP scripts) at localhost instead of host.docker.internal.
+func isAgentOnRunnerHost(workflowData *WorkflowData) bool {
+	return isFirewallDisabledBySandboxAgent(workflowData)
+}
+
 // isFirewallEnabled checks if AWF firewall is enabled for the workflow
 // Firewall is enabled if:
 // - network.firewall is explicitly set to true or an object
