@@ -40,8 +40,33 @@ func TestValidateHostUserRuntime(t *testing.T) {
 		{name: "ubuntu-24.04-arm is refused", mutate: func(d *WorkflowData) { d.RunsOn = "runs-on: ubuntu-24.04-arm" }, wantErr: "does not work on ubuntu-24.04-arm"},
 		{name: "macos is refused", mutate: func(d *WorkflowData) { d.RunsOn = "runs-on: macos-15" }, wantErr: "does not work on macos-15"},
 		{name: "windows is refused", mutate: func(d *WorkflowData) { d.RunsOn = "runs-on: windows-latest" }, wantErr: "does not work on windows-latest"},
-		{name: "default engine is refused", mutate: func(d *WorkflowData) { d.EngineConfig = nil }, wantErr: "only engine: claude"},
-		{name: "codex is refused", mutate: func(d *WorkflowData) { d.EngineConfig.ID = "codex" }, wantErr: "only engine: claude"},
+		{name: "default engine is refused", mutate: func(d *WorkflowData) { d.EngineConfig = nil }, wantErr: "does not support engine: copilot"},
+		{name: "codex is refused", mutate: func(d *WorkflowData) { d.EngineConfig.ID = "codex" }, wantErr: "does not support engine: codex"},
+		{name: "codex is refused even with an endpoint", mutate: func(d *WorkflowData) {
+			d.EngineConfig = &EngineConfig{ID: "codex", Env: map[string]string{"OPENAI_BASE_URL": "http://broker:18080/v1"}}
+		}, wantErr: "does not support engine: codex"},
+		{name: "a prefixed codex ID is refused", mutate: func(d *WorkflowData) {
+			d.EngineConfig = &EngineConfig{ID: "codex-experimental", Env: map[string]string{"OPENAI_BASE_URL": "http://b:1/v1"}}
+		}, wantErr: "does not support engine: codex-experimental"},
+		{name: "a prefixed copilot ID is refused", mutate: func(d *WorkflowData) {
+			d.EngineConfig = &EngineConfig{ID: "copilot-sdk", Env: map[string]string{"OPENAI_BASE_URL": "http://b:1/v1"}}
+		}, wantErr: "does not support engine: copilot-sdk"},
+		{name: "a prefixed gemini ID is refused", mutate: func(d *WorkflowData) {
+			d.EngineConfig = &EngineConfig{ID: "gemini-x", Env: map[string]string{"OPENAI_BASE_URL": "http://b:1/v1"}}
+		}, wantErr: "does not support engine: gemini-x"},
+		{name: "a prefixed pi ID is refused", mutate: func(d *WorkflowData) {
+			d.EngineConfig = &EngineConfig{ID: "pi-x", Env: map[string]string{"OPENAI_BASE_URL": "http://b:1/v1"}}
+		}, wantErr: "does not support engine: pi-x"},
+		{name: "a behavior-defined engine with an endpoint is accepted", mutate: func(d *WorkflowData) {
+			d.EngineConfig = &EngineConfig{ID: "opencode", Env: map[string]string{"OPENAI_BASE_URL": "http://broker:18080/v1"}}
+		}},
+		{name: "a behavior-defined engine without an endpoint is refused", mutate: func(d *WorkflowData) { d.EngineConfig.ID = "opencode" }, wantErr: "needs an inference endpoint"},
+		{name: "claude with its own endpoint is accepted", mutate: func(d *WorkflowData) {
+			d.EngineConfig.Env = map[string]string{"ANTHROPIC_BASE_URL": "http://broker:18081"}
+		}},
+		{name: "an endpoint from an expression is refused", mutate: func(d *WorkflowData) {
+			d.EngineConfig = &EngineConfig{ID: "opencode", Env: map[string]string{"OPENAI_BASE_URL": "${{ secrets.URL }}"}}
+		}, wantErr: "literal http(s) URL"},
 		{name: "non-anthropic provider is refused", mutate: func(d *WorkflowData) { d.EngineConfig.LLMProvider = LLMProviderOpenAI }, wantErr: "only the anthropic inference provider"},
 		{name: "api-target is refused", mutate: func(d *WorkflowData) { d.EngineConfig.APITarget = "api.example.com" }, wantErr: "engine.api-target"},
 		{name: "enclaves are refused", mutate: func(d *WorkflowData) { d.Enclaves = EnclavesConfig{{}} }, wantErr: "enclaves"},
@@ -144,7 +169,7 @@ func TestApplyHostUserAgentEnv(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			applyHostUserAgentEnv(tt.env, LLMProviderAnthropic)
+			applyHostUserAgentEnv(tt.env, true)
 			assert.Equal(t, tt.wantEnv, tt.env)
 		})
 	}
@@ -269,4 +294,65 @@ func TestHostUserKeepsDetectionUnderAWF(t *testing.T) {
 	assert.Contains(t, detection, "awf ", "detection must run under AWF")
 	assert.Contains(t, detection, detectionFirewallLogsDir+"/logs/", "detection must keep uploading its firewall logs")
 	assert.NotContains(t, detection, "host_user_sandbox.sh", "detection must not use the host-user sandbox")
+}
+
+// An engine defined with engine.behaviors (OpenCode) pointed at an endpoint that
+// needs no secret runs in the sandbox without the api-proxy, and its setup steps
+// (the config file the sandbox reads) run before the sandbox is entered.
+func TestHostUserBehaviorDefinedEngineWithEndpoint(t *testing.T) {
+	dir := t.TempDir()
+	shared := filepath.Join(dir, "shared")
+	require.NoError(t, os.MkdirAll(shared, 0o755))
+	definition, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "shared", "opencode.md"))
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(shared, "opencode.md"), definition, 0o644))
+	markdown := `---
+on: workflow_dispatch
+permissions:
+  contents: read
+runs-on: ubuntu-26.04
+strict: false
+imports:
+  - shared/opencode.md
+engine:
+  id: opencode
+  model: openai/gpt-5.5
+  env:
+    OPENAI_BASE_URL: http://broker.example:18080/v1
+    OPENAI_API_KEY: unused
+sandbox:
+  agent:
+    runtime: host-user
+safe-outputs:
+  add-comment:
+    target: "1"
+  threat-detection: false
+---
+
+Do the thing.
+`
+	path := filepath.Join(dir, "oc.md")
+	require.NoError(t, os.WriteFile(path, []byte(markdown), 0o644))
+	require.NoError(t, NewCompiler().CompileWorkflow(path))
+	lockBytes, err := os.ReadFile(filepath.Join(dir, "oc.lock.yml"))
+	require.NoError(t, err)
+	lock := string(lockBytes)
+
+	assert.NotContains(t, lock, "Start inference proxy", "an engine with its own endpoint needs no api-proxy")
+	assert.NotContains(t, lock, "Stop inference proxy")
+	config := strings.Index(lock, "      - name: Write OpenCode Config")
+	enter := strings.Index(lock, "      - name: Enter the host-user sandbox")
+	execute := strings.Index(lock, "      - name: Execute OpenCode CLI")
+	seal := strings.Index(lock, "      - name: Seal the host-user sandbox")
+	require.True(t, config >= 0 && enter >= 0 && execute >= 0 && seal >= 0, "missing steps")
+	assert.Less(t, config, enter, "the engine's config must be written before the sandbox is entered")
+	assert.Less(t, enter, execute)
+	assert.Less(t, execute, seal)
+
+	agent := stepBlock(t, lock, "Execute OpenCode CLI")
+	assert.Contains(t, agent, `host_user_sandbox.sh" run "${gh_aw_sandbox_args[@]}" -- "${RUNNER_TEMP}/gh-aw/host-user-agent-command.sh" 2>&1 | tee -a`)
+	assert.Contains(t, agent, "GH_AW_HOST_USER_AGENT_COMMAND: ", "the engine command travels in the step env")
+	assert.Contains(t, agent, "OPENAI_BASE_URL: http://broker.example:18080/v1")
+	assert.NotContains(t, agent, "secrets.", "the agent step must not reference any secret")
+	assert.Contains(t, lock, "MCP_GATEWAY_DOMAIN=\"localhost\"", "the sandbox reaches the gateway on localhost")
 }
