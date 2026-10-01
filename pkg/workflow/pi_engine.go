@@ -386,13 +386,13 @@ func (e *PiEngine) buildPiExecutionCommand(workflowData *WorkflowData, logFile, 
 		if mcpCLIPath := GetMCPCLIPathSetup(workflowData); mcpCLIPath != "" {
 			piCommandWithPath = fmt.Sprintf("%s && %s", mcpCLIPath, piCommandWithPath)
 		}
-		pathSetup := "touch " + AgentStepSummaryPath + "\n" +
-			"GH_AW_NODE_BIN=$(command -v node 2>/dev/null || true)\n" +
+		pathSetup := "GH_AW_NODE_BIN=$(command -v node 2>/dev/null || true)\n" +
 			"export GH_AW_NODE_BIN"
 		return BuildAWFCommand(AWFCommandConfig{
 			EngineName:         "pi",
 			EngineCommand:      buildShellHarnessCommand("pi", piCommandWithPath),
 			LogFile:            logFile,
+			StepSummaryPath:    AgentStepSummaryPath,
 			WorkflowData:       workflowData,
 			UsesTTY:            false,
 			AllowedDomains:     e.piAllowedDomains(workflowData, modelConfigured),
@@ -408,9 +408,8 @@ func (e *PiEngine) buildPiExecutionCommand(workflowData *WorkflowData, logFile, 
 	}
 	return fmt.Sprintf(`set -o pipefail
 printf '%%s' "$(date +%%s%%3N)" > %s
-touch %s
-(umask 177 && touch %s)
-%s 2>&1 | tee -a %s`, AgentCLIStartMsPath, AgentStepSummaryPath, logFile, buildShellHarnessCommand("pi", piCommand), logFile)
+%s
+%s 2>&1 | tee -a %s`, AgentCLIStartMsPath, buildAgentOutputFilesSetup(AgentStepSummaryPath, logFile), buildShellHarnessCommand("pi", piCommand), logFile)
 }
 
 func (e *PiEngine) piAllowedDomains(workflowData *WorkflowData, modelConfigured bool) string {

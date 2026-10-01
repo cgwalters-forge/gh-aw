@@ -75,6 +75,14 @@ type AWFCommandConfig struct {
 	// LogFile is the path to the log file
 	LogFile string
 
+	// StepSummaryPath is the file the engine uses as GITHUB_STEP_SUMMARY. When set,
+	// it is created before AWF starts so the agent can write to it.
+	StepSummaryPath string
+
+	// ExtraLogFiles are engine log files, besides LogFile, that are created before
+	// AWF starts with the same private permissions as LogFile (e.g. a debug log).
+	ExtraLogFiles []string
+
 	// WorkflowData contains all workflow configuration
 	WorkflowData *WorkflowData
 

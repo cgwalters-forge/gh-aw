@@ -114,7 +114,7 @@ func TestClaudeEngineNetworkPermissions(t *testing.T) {
 			t.Error("Claude debug output should use a file separate from the stream-json transcript")
 		}
 
-		if !strings.Contains(stepYAML, "(umask 177 && touch /tmp/gh-aw/claude-debug.log)") {
+		if !strings.Contains(stepYAML, "(umask 177 && touch test-log /tmp/gh-aw/claude-debug.log)") {
 			t.Error("Claude debug log should be created with restrictive permissions before AWF starts")
 		}
 

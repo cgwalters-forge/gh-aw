@@ -410,13 +410,14 @@ func (e *ClaudeEngine) buildClaudeFullCommand(workflowData *WorkflowData, claude
 		}
 
 		return BuildAWFCommand(AWFCommandConfig{
-			EngineName:     "claude",
-			EngineCommand:  claudeCommandWithPath, // Command with npm PATH setup runs inside AWF
-			LogFile:        logFile,
-			WorkflowData:   workflowData,
-			UsesTTY:        true, // Claude Code CLI requires TTY
-			AllowedDomains: allowedDomains,
-			PathSetup:      "mkdir -p " + constants.TmpGhAwDir + " && (umask 177 && touch " + claudeDebugLogFile + ") && touch " + AgentStepSummaryPath, // Runs BEFORE AWF on the host
+			EngineName:      "claude",
+			EngineCommand:   claudeCommandWithPath, // Command with npm PATH setup runs inside AWF
+			LogFile:         logFile,
+			StepSummaryPath: AgentStepSummaryPath,
+			ExtraLogFiles:   []string{claudeDebugLogFile},
+			WorkflowData:    workflowData,
+			UsesTTY:         true, // Claude Code CLI requires TTY
+			AllowedDomains:  allowedDomains,
 			// Exclude every env var whose step-env value is a secret so the agent
 			// cannot read raw token values via bash tools (env / printenv).
 			ExcludeEnvVarNames:   ComputeAWFExcludeEnvVarNames(workflowData, llmProviderSecretNames(e.ResolveLLMProvider(workflowData))),
@@ -430,13 +431,10 @@ func (e *ClaudeEngine) buildClaudeFullCommand(workflowData *WorkflowData, claude
 	// Leave stderr on the workflow log so non-JSON diagnostics cannot corrupt the parser input.
 	// PATH is already set correctly by actions/setup-* steps which prepend to PATH.
 	return fmt.Sprintf(`set -o pipefail
-          printf '%%s' "$(date +%%s%%3N)" > %s
-          touch %s
-          (umask 177 && touch %s)
-          mkdir -p %s
-          (umask 177 && touch %s)
-          # Execute Claude Code CLI with prompt from file
-          %s | tee -a %s`, AgentCLIStartMsPath, AgentStepSummaryPath, logFile, constants.TmpGhAwDir, claudeDebugLogFile, claudeCommand, logFile)
+printf '%%s' "$(date +%%s%%3N)" > %s
+%s
+# Execute Claude Code CLI with prompt from file
+%s | tee -a %s`, AgentCLIStartMsPath, buildAgentOutputFilesSetup(AgentStepSummaryPath, logFile, claudeDebugLogFile), claudeCommand, logFile)
 }
 
 // buildClaudeCommandEnv builds the environment variable map for the Claude execution step.

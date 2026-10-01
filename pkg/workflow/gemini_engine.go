@@ -271,10 +271,9 @@ func (e *GeminiEngine) GetExecutionSteps(workflowData *WorkflowData, logFile str
 			WorkflowData:   workflowData,
 			UsesTTY:        false,
 			AllowedDomains: allowedDomains,
-			// Create the agent step summary file before AWF starts so it is accessible
-			// inside the sandbox. The agent writes its step summary content here, and the
-			// file is appended to $GITHUB_STEP_SUMMARY after secret redaction.
-			PathSetup: "touch " + AgentStepSummaryPath,
+			// The agent writes its step summary content here, and the file is
+			// appended to $GITHUB_STEP_SUMMARY after secret redaction.
+			StepSummaryPath: AgentStepSummaryPath,
 			// Exclude every env var whose step-env value is a secret so the agent
 			// cannot read raw token values via bash tools (env / printenv).
 			ExcludeEnvVarNames: ComputeAWFExcludeEnvVarNames(workflowData, e.GetRequiredSecretNames(workflowData)),
@@ -282,9 +281,8 @@ func (e *GeminiEngine) GetExecutionSteps(workflowData *WorkflowData, logFile str
 	} else {
 		command = fmt.Sprintf(`set -o pipefail
 printf '%%s' "$(date +%%s%%3N)" > %s
-touch %s
-(umask 177 && touch %s)
-%s 2>&1 | tee -a %s`, AgentCLIStartMsPath, AgentStepSummaryPath, logFile, buildShellHarnessCommand("gemini", geminiCommand), logFile)
+%s
+%s 2>&1 | tee -a %s`, AgentCLIStartMsPath, buildAgentOutputFilesSetup(AgentStepSummaryPath, logFile), buildShellHarnessCommand("gemini", geminiCommand), logFile)
 	}
 
 	// Build environment variables

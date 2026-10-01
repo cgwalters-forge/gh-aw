@@ -380,6 +380,7 @@ func (e *CodexEngine) buildCodexExecutionCommand(workflowData *WorkflowData, log
 			EngineName:         "codex",
 			EngineCommand:      codexCommandWithSetup,
 			LogFile:            logFile,
+			StepSummaryPath:    AgentStepSummaryPath,
 			WorkflowData:       workflowData,
 			UsesTTY:            false,
 			AllowedDomains:     e.codexAllowedDomains(workflowData),
@@ -394,18 +395,16 @@ func (e *CodexEngine) buildCodexExecutionCommand(workflowData *WorkflowData, log
 	if harnessScriptName != "" {
 		return fmt.Sprintf(`set -o pipefail
 printf '%%s' "$(date +%%s%%3N)" > %s
-touch %s
-(umask 177 && touch %s)
+%s
 mkdir -p "$CODEX_HOME/logs"
-%s%s 2>&1 | tee %s`, AgentCLIStartMsPath, AgentStepSummaryPath, logFile, schemaWritePrefix, codexCommand, logFile)
+%s%s 2>&1 | tee %s`, AgentCLIStartMsPath, buildAgentOutputFilesSetup(AgentStepSummaryPath, logFile), schemaWritePrefix, codexCommand, logFile)
 	}
 	return fmt.Sprintf(`set -o pipefail
 printf '%%s' "$(date +%%s%%3N)" > %s
-touch %s
-(umask 177 && touch %s)
+%s
 INSTRUCTION="$(cat "$GH_AW_PROMPT")"
 mkdir -p "$CODEX_HOME/logs"
-%s%s 2>&1 | tee %s`, AgentCLIStartMsPath, AgentStepSummaryPath, logFile, schemaWritePrefix, codexCommand, logFile)
+%s%s 2>&1 | tee %s`, AgentCLIStartMsPath, buildAgentOutputFilesSetup(AgentStepSummaryPath, logFile), schemaWritePrefix, codexCommand, logFile)
 }
 
 func (e *CodexEngine) codexAllowedDomains(workflowData *WorkflowData) string {
@@ -428,7 +427,7 @@ func (e *CodexEngine) defaultDomains(workflowData *WorkflowData) []string {
 }
 
 func (e *CodexEngine) codexPathSetup(workflowData *WorkflowData, detectionSchemaWriteCmd string) string {
-	base := "mkdir -p \"$CODEX_HOME/logs\" && touch " + AgentStepSummaryPath
+	base := "mkdir -p \"$CODEX_HOME/logs\""
 	if workflowData.IsDetectionRun {
 		return base + " && " + detectionSchemaWriteCmd
 	}

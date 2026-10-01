@@ -483,7 +483,18 @@ func (e *CopilotEngine) buildCopilotFirewallCommand(workflowData *WorkflowData, 
 	if !isBYOKMode {
 		copilotCoreSecrets = []string{"COPILOT_GITHUB_TOKEN"}
 	}
-	return BuildAWFCommand(AWFCommandConfig{EngineName: "copilot", EngineCommand: engineCommand, LogFile: logFile, WorkflowData: workflowData, UsesTTY: false, AllowedDomains: allowedDomains, ResolveMaxAICreditsFromEnv: true, PathSetup: e.buildCopilotAWFPathSetup(workflowData, customCommandScriptSetup), ExcludeEnvVarNames: ComputeAWFExcludeEnvVarNames(workflowData, copilotCoreSecrets)})
+	return BuildAWFCommand(AWFCommandConfig{
+		EngineName:                 "copilot",
+		EngineCommand:              engineCommand,
+		LogFile:                    logFile,
+		StepSummaryPath:            copilotStepSummaryPath(workflowData),
+		WorkflowData:               workflowData,
+		UsesTTY:                    false,
+		AllowedDomains:             allowedDomains,
+		ResolveMaxAICreditsFromEnv: true,
+		PathSetup:                  e.buildCopilotAWFPathSetup(workflowData, customCommandScriptSetup),
+		ExcludeEnvVarNames:         ComputeAWFExcludeEnvVarNames(workflowData, copilotCoreSecrets),
+	})
 }
 
 func (e *CopilotEngine) buildCopilotAllowedDomains(workflowData *WorkflowData) string {
@@ -506,9 +517,7 @@ func (e *CopilotEngine) buildCopilotAllowedDomains(workflowData *WorkflowData) s
 }
 
 func (e *CopilotEngine) buildCopilotAWFPathSetup(workflowData *WorkflowData, customCommandScriptSetup string) string {
-	stepSummaryPath := copilotStepSummaryPath(workflowData)
-	pathSetup := "touch " + stepSummaryPath + "\n" +
-		"GH_AW_NODE_BIN=$(command -v node 2>/dev/null || true)\n" +
+	pathSetup := "GH_AW_NODE_BIN=$(command -v node 2>/dev/null || true)\n" +
 		"export GH_AW_NODE_BIN\n" +
 		"export COPILOT_API_KEY=\"$" + constants.CopilotBYOKDummyAPIKeyEnvVar + "\""
 	usesInstalledCopilotBinary := workflowData.EngineConfig == nil || workflowData.EngineConfig.Command == ""
@@ -537,7 +546,6 @@ func copilotStepSummaryPath(workflowData *WorkflowData) string {
 
 func (e *CopilotEngine) buildCopilotDirectCommand(workflowData *WorkflowData, copilotCommand, customCommandScriptSetup, mkdirCommands, logFile string) string {
 	// Run copilot command without AWF wrapper.
-	// Prepend a touch command to create the agent step summary file before copilot runs.
 	preCommandSetup := mkdirCommands
 	if customCommandScriptSetup != "" {
 		preCommandSetup = customCommandScriptSetup + "\n" + preCommandSetup
@@ -546,9 +554,8 @@ func (e *CopilotEngine) buildCopilotDirectCommand(workflowData *WorkflowData, co
 	preCommandSetup = buildCopilotSettingsCleanupAndExitCodeTrap() + buildCopilotSettingsSetup(buildCopilotSettingsContent(workflowData), customCommandScriptSetup != "") + buildCopilotMCPConfigExport(workflowData) + preCommandSetup
 	return fmt.Sprintf(`set -o pipefail
 printf '%%s' "$(date +%%s%%3N)" > %s
-touch %s
-(umask 177 && touch %s)
-%s%s 2>&1 | tee %s`, AgentCLIStartMsPath, copilotStepSummaryPath(workflowData), logFile, preCommandSetup, copilotCommand, logFile)
+%s
+%s%s 2>&1 | tee %s`, AgentCLIStartMsPath, buildAgentOutputFilesSetup(copilotStepSummaryPath(workflowData), logFile), preCommandSetup, copilotCommand, logFile)
 }
 
 type copilotStepEnvFlags struct {
