@@ -25,6 +25,28 @@ const AgentStepSummaryPath = "/tmp/gh-aw/agent-step-summary.md"
 // workspace audit and CLI proxy startup.
 const AgentCLIStartMsPath = "/tmp/gh-aw/agent_cli_start_ms.txt"
 
+// buildAgentOutputFilesSetup returns the shell commands that create the files an
+// agent execution step writes, before the engine starts. Every engine's execution
+// step, with or without AWF, creates these files through this function.
+//
+// The step summary (skipped when stepSummaryPath is empty) gets default permissions
+// because later steps read it. Log files get mode 0600 because they can capture
+// sensitive engine output.
+func buildAgentOutputFilesSetup(stepSummaryPath string, logFiles ...string) string {
+	var lines []string
+	if stepSummaryPath != "" {
+		lines = append(lines, "touch "+shellEscapeArg(stepSummaryPath))
+	}
+	if len(logFiles) > 0 {
+		escaped := make([]string, len(logFiles))
+		for i, logFile := range logFiles {
+			escaped[i] = shellEscapeArg(logFile)
+		}
+		lines = append(lines, "(umask 177 && touch "+strings.Join(escaped, " ")+")")
+	}
+	return strings.Join(lines, "\n")
+}
+
 // generateCleanupStep generates the cleanup step YAML for workspace files, excluding /tmp/gh-aw/ files
 // Returns the YAML string and whether a cleanup step was generated
 func generateCleanupStep(outputFiles []string) (string, bool) {

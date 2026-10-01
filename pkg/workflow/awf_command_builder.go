@@ -47,12 +47,12 @@ func BuildAWFCommand(config AWFCommandConfig) string {
 	modelsJSONPathExport := buildModelsJSONPathExportScript(isArcDind)
 	engineCommand := rewriteEngineCommandForRuntime(config.EngineCommand, isArcDind)
 	shellWrappedCommand := WrapCommandInShell(engineCommand)
-	preCreateLog := fmt.Sprintf("(umask 177 && touch %s)", shellEscapeArg(config.LogFile))
+	outputFilesSetup := buildAgentOutputFilesSetup(config.StepSummaryPath, append([]string{config.LogFile}, config.ExtraLogFiles...)...)
 	writeAgentCLIStartMs := "printf '%s' \"$(date +%s%3N)\" > " + shellEscapeArg(AgentCLIStartMsPath)
 	command := buildAWFCommandScript(buildAWFCommandScriptInput{
 		writeAgentCLIStartMs:   writeAgentCLIStartMs,
 		pathSetup:              config.PathSetup,
-		preCreateLog:           preCreateLog,
+		outputFilesSetup:       outputFilesSetup,
 		configFileSetup:        configFileSetup,
 		modelsJSONPathExport:   modelsJSONPathExport,
 		arcDindDockerHostProbe: arcDindDockerHostProbe,
@@ -324,7 +324,7 @@ func buildConfigFilePrintfLine(printfArg string) string {
 type buildAWFCommandScriptInput struct {
 	writeAgentCLIStartMs   string
 	pathSetup              string
-	preCreateLog           string
+	outputFilesSetup       string
 	configFileSetup        string
 	modelsJSONPathExport   string
 	arcDindDockerHostProbe string
@@ -349,7 +349,7 @@ func buildAWFCommandScript(input buildAWFCommandScriptInput) string {
 	if input.pathSetup != "" {
 		lines = append(lines, input.pathSetup)
 	}
-	lines = append(lines, input.preCreateLog)
+	lines = append(lines, input.outputFilesSetup)
 	if input.configFileSetup != "" {
 		lines = append(lines, input.configFileSetup)
 	}

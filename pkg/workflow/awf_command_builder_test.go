@@ -802,7 +802,7 @@ func TestBuildAWFCommand_ServicePortsRequireLegacy(t *testing.T) {
 func TestBuildAWFCommandScript_OptionalSections(t *testing.T) {
 	base := buildAWFCommandScriptInput{
 		writeAgentCLIStartMs:   "start",
-		preCreateLog:           "pre",
+		outputFilesSetup:       "pre",
 		modelsJSONPathExport:   "models",
 		arcDindDockerHostProbe: "probe",
 		arcDindPrefixProbe:     "prefix",
@@ -860,7 +860,7 @@ func TestBuildAWFCommandScript_OptionalSections(t *testing.T) {
 func TestBuildAWFCommandScript_RetriesEngineStartupFailuresOutsideHarness(t *testing.T) {
 	input := buildAWFCommandScriptInput{
 		writeAgentCLIStartMs: "start",
-		preCreateLog:         "pre",
+		outputFilesSetup:     "pre",
 		awfCommand:           "awf",
 		expandableArgs:       "--expand",
 		awfArgs:              []string{"--arg", "value"},
